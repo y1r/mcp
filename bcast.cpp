@@ -58,6 +58,14 @@ size_t get_filesize(const std::string &filename) {
     return stat_buf.st_size;
 }
 
+mode_t get_permission(const std::string &filename) {
+    struct stat stat_buf;
+
+    assert(stat(filename.c_str(), &stat_buf) == 0);
+
+    return stat_buf.st_mode;
+}
+
 int main(int argc, char *argv[]) {
     std::string from, to;
 
@@ -70,6 +78,10 @@ int main(int argc, char *argv[]) {
     size_t filesize = 0;
     if (mpi_rank == ROOT) filesize = get_filesize(from);
     MPI_Bcast(&filesize, sizeof(filesize), MPI_BYTE, ROOT, MPI_COMM_WORLD);
+
+    mode_t mode = 0;
+    if (mpi_rank == ROOT) mode = get_permission(from);
+    MPI_Bcast(&mode, sizeof(mode), MPI_BYTE, ROOT, MPI_COMM_WORLD);
 
     void *buffer1 = malloc(BLOCKSIZE);
     void *buffer2 = malloc(BLOCKSIZE);
@@ -86,7 +98,7 @@ int main(int argc, char *argv[]) {
     }
 
     // write_fd = open(to.c_str(), O_WRONLY | O_CREAT | O_NONBLOCK);
-    write_fd = open(to.c_str(), O_WRONLY | O_CREAT);
+    write_fd = open(to.c_str(), O_WRONLY | O_CREAT, mode);
     assert(write_fd != -1);
 
     for (size_t i = 0; i < iterations; i++) {
@@ -98,11 +110,11 @@ int main(int argc, char *argv[]) {
         double start = get_time();
         {
             if (mpi_rank == ROOT) {
-                read(read_fd, buffer1, count, 0);
+                read(read_fd, buffer1, count);
             }
             MPI_Bcast(buffer1, count, MPI_BYTE, ROOT, MPI_COMM_WORLD);
 
-            write(write_fd, buffer1, count, 0);
+            write(write_fd, buffer1, count);
         }
         double end = get_time();
 
@@ -115,6 +127,9 @@ int main(int argc, char *argv[]) {
 
     free(buffer2);
     free(buffer1);
+
+    if (read_fd != -1) close(read_fd);
+    if (write_fd != -1) close(write_fd);
 
     MPI_Finalize();
 
