@@ -120,9 +120,11 @@ int main(int argc, char *argv[]) {
 
         double elapsed = end - start;
 
-        std::cout << "rank: " << mpi_rank << ", received: " << count
-                  << "on: " << count / elapsed / 1000 / 1000 << "[MB/s]"
-                  << std::endl;
+        if (verbose) {
+            std::cout << "rank: " << mpi_rank << ", received: " << count
+                      << ", on: " << count / elapsed / 1000 / 1000 << "[MB/s]"
+                      << std::endl;
+        }
     }
 
     free(buffer2);
