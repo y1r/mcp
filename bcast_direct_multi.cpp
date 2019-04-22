@@ -177,7 +177,8 @@ void copy_file_using_direct_io(const std::string &from, const std::string &to,
 
     std::thread write_thread([
                                  // Input
-                                 &completed_bcast, &all_completed_bcast, to, mode,
+                                 &completed_bcast, &all_completed_bcast, to,
+                                 mode,
                                  // Output
                                  &memory_pool] {
         int write_fd = -1;
