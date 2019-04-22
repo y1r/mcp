@@ -39,20 +39,20 @@ class ConcurrentQueue {
 
             // Check queue_ status and return when available.
             if (not queue_.empty()) {
-                T v = queue_.top();
+                T v = queue_.front();
                 queue_.pop();
 
                 return v;
             }
 
-            cond_.wait(lock);
+            //cond_.wait(lock);
         }
     }
 
-    void push(T &&v) {
+    void push(T v) {
         {
             std::lock_guard<std::mutex> lock(mtx_);
-            queue_.push(std::forward(v));
+            queue_.push(v);
         }
 
         cond_.notify_one();
@@ -119,20 +119,10 @@ mode_t get_permission(const std::string &filename) {
 void copy_file_using_direct_io(const std::string &from, const std::string &to,
                                mode_t mode, size_t iterations, int mpi_rank,
                                int verbose) {
-    int read_fd = -1;
-    int write_fd = -1;
-
-    if (mpi_rank == ROOT) {
-        read_fd = open(from.c_str(), O_RDONLY | O_DIRECT);
-        assert(read_fd != -1);
-    }
-
-    write_fd = open(to.c_str(), O_WRONLY | O_CREAT | O_DIRECT, mode);
-    assert(write_fd != -1);
-
     ConcurrentQueue<void *> memory_pool;
     for (int i = 0; i < N_OF_BUFFERS; i++) {
-        void *buffer = std::aligned_alloc(512, BLOCKSIZE);
+        // C11 function
+        void *buffer = aligned_alloc(512, BLOCKSIZE);
 
         memory_pool.push(buffer);
     }
@@ -145,9 +135,16 @@ void copy_file_using_direct_io(const std::string &from, const std::string &to,
 
     std::thread read_thread([
                                 // Input
-                                iterations, mpi_rank,
+                                iterations, mpi_rank, &memory_pool, from,
                                 // Output
                                 &completed_read, &all_completed_read] {
+        int read_fd = -1;
+
+        if (mpi_rank == ROOT) {
+            read_fd = open(from.c_str(), O_RDONLY | O_DIRECT);
+            assert(read_fd != -1);
+        }
+
         for (size_t i = 0; i < iterations; i++) {
             void *buffer = memory_pool.pop();
             if (mpi_rank == ROOT) {
@@ -158,6 +155,8 @@ void copy_file_using_direct_io(const std::string &from, const std::string &to,
         }
 
         all_completed_read = true;
+
+        if (read_fd != -1) close(read_fd);
     });
 
     std::thread bcast_thread([
@@ -165,7 +164,7 @@ void copy_file_using_direct_io(const std::string &from, const std::string &to,
                                  &completed_read, &all_completed_read,
                                  // Output
                                  &completed_bcast, &all_completed_bcast] {
-        while (not all_completed_read && not completed_read.empty()) {
+        while (not all_completed_read || not completed_read.empty()) {
             void *buffer = completed_read.pop();
 
             MPI_Bcast(buffer, BLOCKSIZE, MPI_BYTE, ROOT, MPI_COMM_WORLD);
@@ -178,11 +177,23 @@ void copy_file_using_direct_io(const std::string &from, const std::string &to,
 
     std::thread write_thread([
                                  // Input
-                                 &completed_bcast, &all_completed_bcast] {
-        while (not all_completed_bcast && not completed_bcast.empty()) {
+                                 &completed_bcast, &all_completed_bcast, to, mode,
+                                 // Output
+                                 &memory_pool] {
+        int write_fd = -1;
+
+        write_fd = open(to.c_str(), O_WRONLY | O_CREAT | O_DIRECT, mode);
+        assert(write_fd != -1);
+
+        while (not all_completed_bcast || not completed_bcast.empty()) {
+            void *buffer = completed_bcast.pop();
+
             write(write_fd, buffer, BLOCKSIZE);
+
             memory_pool.push(buffer);
         }
+
+        if (write_fd != -1) close(write_fd);
     });
 
     read_thread.join();
@@ -192,9 +203,6 @@ void copy_file_using_direct_io(const std::string &from, const std::string &to,
     while (not memory_pool.empty()) {
         free(memory_pool.pop());
     }
-
-    if (read_fd != -1) close(read_fd);
-    if (write_fd != -1) close(write_fd);
 }
 
 void copy_file_with_offset(const std::string &from, const std::string &to,
