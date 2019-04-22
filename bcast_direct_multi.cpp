@@ -45,7 +45,7 @@ class ConcurrentQueue {
                 return v;
             }
 
-            //cond_.wait(lock);
+            cond_.wait(lock);
         }
     }
 
