@@ -19,9 +19,9 @@
 #include <vector>
 
 // 512-bytes aligned
-constexpr size_t BLOCKSIZE = 8 * 1024 * 1024;
+constexpr size_t BLOCKSIZE = 16 * 1024 * 1024;
 constexpr int ROOT = 0;
-constexpr size_t N_OF_BUFFERS = 3;
+constexpr size_t N_OF_BUFFERS = 4;
 
 inline double get_time() {
     struct timeval tv;
@@ -136,6 +136,7 @@ void copy_file_using_direct_io(const std::string &from, const std::string &to,
     std::thread read_thread([
                                 // Input
                                 iterations, mpi_rank, &memory_pool, from,
+                                verbose,
                                 // Output
                                 &completed_read, &all_completed_read] {
         int read_fd = -1;
@@ -148,7 +149,17 @@ void copy_file_using_direct_io(const std::string &from, const std::string &to,
         for (size_t i = 0; i < iterations; i++) {
             void *buffer = memory_pool.pop();
             if (mpi_rank == ROOT) {
+                double start = getTime();
+
                 read(read_fd, buffer, BLOCKSIZE);
+
+                double end = getTime();
+
+                if (mpi_rank == ROOT && verbose) {
+                    std::cout
+                        << "Read: " << BLOCKSIZE / (end - start) / 1000 / 1000
+                        << "[MB/s]" << std::endl;
+                }
             }
 
             completed_read.push(buffer);
@@ -159,43 +170,64 @@ void copy_file_using_direct_io(const std::string &from, const std::string &to,
         if (read_fd != -1) close(read_fd);
     });
 
-    std::thread bcast_thread([
-                                 // Input
-                                 &completed_read, &all_completed_read,
-                                 // Output
-                                 &completed_bcast, &all_completed_bcast] {
-        while (not all_completed_read || not completed_read.empty()) {
-            void *buffer = completed_read.pop();
+    std::thread bcast_thread(
+        [
+            // Input
+            &completed_read, &all_completed_read, verbose, mpi_rank,
+            // Output
+            &completed_bcast, &all_completed_bcast] {
+            while (not all_completed_read || not completed_read.empty()) {
+                void *buffer = completed_read.pop();
 
-            MPI_Bcast(buffer, BLOCKSIZE, MPI_BYTE, ROOT, MPI_COMM_WORLD);
+                double start = getTime();
 
-            completed_bcast.push(buffer);
-        }
+                MPI_Bcast(buffer, BLOCKSIZE, MPI_BYTE, ROOT, MPI_COMM_WORLD);
 
-        all_completed_bcast = true;
-    });
+                double end = getTime();
 
-    std::thread write_thread([
-                                 // Input
-                                 &completed_bcast, &all_completed_bcast, to,
-                                 mode,
-                                 // Output
-                                 &memory_pool] {
-        int write_fd = -1;
+                if (mpi_rank == ROOT && verbose) {
+                    std::cout
+                        << "Bcast: " << BLOCKSIZE / (end - start) / 1000 / 1000
+                        << "[MB/s]" << std::endl;
+                }
 
-        write_fd = open(to.c_str(), O_WRONLY | O_CREAT | O_DIRECT, mode);
-        assert(write_fd != -1);
+                completed_bcast.push(buffer);
+            }
 
-        while (not all_completed_bcast || not completed_bcast.empty()) {
-            void *buffer = completed_bcast.pop();
+            all_completed_bcast = true;
+        });
 
-            write(write_fd, buffer, BLOCKSIZE);
+    std::thread write_thread(
+        [
+            // Input
+            &completed_bcast, &all_completed_bcast, to, mode, verbose, mpi_rank,
+            // Output
+            &memory_pool] {
+            int write_fd = -1;
 
-            memory_pool.push(buffer);
-        }
+            write_fd = open(to.c_str(), O_WRONLY | O_CREAT | O_DIRECT, mode);
+            assert(write_fd != -1);
 
-        if (write_fd != -1) close(write_fd);
-    });
+            while (not all_completed_bcast || not completed_bcast.empty()) {
+                void *buffer = completed_bcast.pop();
+
+                double start = getTime();
+
+                write(write_fd, buffer, BLOCKSIZE);
+
+                double end = getTime();
+
+                if (mpi_rank == ROOT && verbose) {
+                    std::cout
+                        << "Write: " << BLOCKSIZE / (end - start) / 1000 / 1000
+                        << "[MB/s]" << std::endl;
+                }
+
+                memory_pool.push(buffer);
+            }
+
+            if (write_fd != -1) close(write_fd);
+        });
 
     read_thread.join();
     bcast_thread.join();
