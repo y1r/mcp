@@ -19,7 +19,7 @@
 #include <vector>
 
 // 512-bytes aligned
-constexpr size_t BLOCKSIZE = 16 * 1024 * 1024;
+constexpr size_t BLOCKSIZE = 32 * 1024 * 1024;
 constexpr int ROOT = 0;
 constexpr size_t N_OF_BUFFERS = 4;
 
@@ -142,18 +142,18 @@ void copy_file_using_direct_io(const std::string &from, const std::string &to,
         int read_fd = -1;
 
         if (mpi_rank == ROOT) {
-            read_fd = open(from.c_str(), O_RDONLY | O_DIRECT);
+            read_fd = open(from.c_str(), O_RDONLY);
             assert(read_fd != -1);
         }
 
         for (size_t i = 0; i < iterations; i++) {
             void *buffer = memory_pool.pop();
             if (mpi_rank == ROOT) {
-                double start = getTime();
+                double start = get_time();
 
                 read(read_fd, buffer, BLOCKSIZE);
 
-                double end = getTime();
+                double end = get_time();
 
                 if (mpi_rank == ROOT && verbose) {
                     std::cout
@@ -179,11 +179,11 @@ void copy_file_using_direct_io(const std::string &from, const std::string &to,
             while (not all_completed_read || not completed_read.empty()) {
                 void *buffer = completed_read.pop();
 
-                double start = getTime();
+                double start = get_time();
 
                 MPI_Bcast(buffer, BLOCKSIZE, MPI_BYTE, ROOT, MPI_COMM_WORLD);
 
-                double end = getTime();
+                double end = get_time();
 
                 if (mpi_rank == ROOT && verbose) {
                     std::cout
@@ -211,11 +211,11 @@ void copy_file_using_direct_io(const std::string &from, const std::string &to,
             while (not all_completed_bcast || not completed_bcast.empty()) {
                 void *buffer = completed_bcast.pop();
 
-                double start = getTime();
+                double start = get_time();
 
                 write(write_fd, buffer, BLOCKSIZE);
 
-                double end = getTime();
+                double end = get_time();
 
                 if (mpi_rank == ROOT && verbose) {
                     std::cout
