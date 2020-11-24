@@ -13,6 +13,10 @@ Use `MPI_Bcast` to broadcast with `O_DIRECT` writing.
 - mcp_mpi_bcast_direct_pipeline.cpp
 Use `MPI_Bcast` to broadcast with `O_DIRECT` pipelined writing.
 
+- mcp.py
+Use `MPI_Bcast` to broadcast then use tarfile module to extract tar on-the-fly.
+Since pipelining is not implemented yet, use mcat with tar command.
+
 ```
 mpicxx mcp_mpi_bcast_direct_pipeline.cpp -o mcp
 mpiexec -N 1 ./mcp ${from} ${dst}
@@ -30,5 +34,5 @@ mpiexec -N 1 copy-tar-and-extract.sh
 ```
 #!/bin/bash
 
-./mcp ${from}.tar | tar xf - -C ${dst}
+./mcat ${from}.tar | tar xf - -C ${dst}
 ```
